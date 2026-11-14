@@ -1,0 +1,60 @@
+name: Catering Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catering-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Get UTC date
+        id: utc-date
+        run: echo "value=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore today's CSV history
+        uses: actions/cache/restore@v4
+        with:
+          path: catering-monitor-report.csv
+          key: catering-monitor-${{ steps.utc-date.outputs.value }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            catering-monitor-${{ steps.utc-date.outputs.value }}-
+
+      - name: Run one health check and update the report
+        run: python monitor.py --report catering-monitor-report.csv
+
+      - name: Save today's CSV history
+        if: always() && hashFiles('catering-monitor-report.csv') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: catering-monitor-report.csv
+          key: catering-monitor-${{ steps.utc-date.outputs.value }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload downloadable CSV report
+        if: always() && hashFiles('catering-monitor-report.csv') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: catering-monitor-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: catering-monitor-report.csv
+          if-no-files-found: error
+          retention-days: 14
